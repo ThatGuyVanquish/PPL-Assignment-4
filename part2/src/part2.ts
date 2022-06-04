@@ -14,20 +14,45 @@ export function makeTableService<T>(sync: (table?: Table<T>) => Promise<Table<T>
     // optional initialization code
     return {
         get(key: string): Promise<T> {
-            return Promise.reject('not implemented')
+            try {
+                return sync().then((table) => new Promise<T>((resolve, reject) => key in table ? resolve(table[key]) : reject(MISSING_KEY)));
+            }
+            catch {
+                return Promise.reject(MISSING_KEY);
+            }
         },
         set(key: string, val: T): Promise<void> {
-            return Promise.reject('not implemented')
+            try {
+                return sync().then((table) => new Promise<void>((resolve) => {
+                    let ret: Table<T> = {...table, [key]:val}; // spreads table, if key,val exists replaces previous val for val, otherwise adds it
+                    sync(ret);
+                    resolve();
+                }))
+            }
+            catch {
+                return Promise.reject(MISSING_KEY);
+            }
         },
         delete(key: string): Promise<void> {
-            return Promise.reject('not implemented')
+            try {
+                return sync().then((table) => new Promise<void>((resolve, reject) => {
+                    key in table ? 0 : reject(MISSING_KEY);
+                    let {[key]:val, ...ret}: Table<T> = table; // sets 'ret' to the rest of table except for the pair key,val
+                    sync(ret);
+                    resolve();
+                }))
+            }
+            catch {
+                return Promise.reject(MISSING_KEY);
+            }
         }
     }
 }
 
 // Q 2.1 (b)
 export function getAll<T>(store: TableService<T>, keys: string[]): Promise<T[]> {
-    return Promise.reject('not implemented')
+    const values: Promise<T>[] = keys.map((key) => store.get(key));
+    return Promise.all(values); // Creates promises from all values
 }
 
 
@@ -42,9 +67,12 @@ export function isReference<T>(obj: T | Reference): obj is Reference {
 
 export async function constructObjectFromTables(tables: TableServiceTable, ref: Reference) {
     async function deref(ref: Reference) {
-        return Promise.reject('not implemented')
+        if (!(ref.table in tables)) throw MISSING_TABLE_SERVICE;
+        const refedVal = await tables[ref.table].get(ref.key); // should we add return of promise if key wasn't found?
+        let allReferences: any[] = await Promise.all(Object.entries(refedVal).map(
+            async(entry) => isReference(entry[1]) ? [entry[0], await deref(entry[1])] : entry));
+        return Object.fromEntries(allReferences);
     }
-
     return deref(ref)
 }
 
@@ -52,13 +80,23 @@ export async function constructObjectFromTables(tables: TableServiceTable, ref: 
 
 export function lazyProduct<T1, T2>(g1: () => Generator<T1>, g2: () => Generator<T2>): () => Generator<[T1, T2]> {
     return function* () {
-        // TODO implement!
+        for (let first of g1()) {
+            for (let second of g2()) {
+                yield [first, second];
+            }
+        }
     }
 }
 
 export function lazyZip<T1, T2>(g1: () => Generator<T1>, g2: () => Generator<T2>): () => Generator<[T1, T2]> {
     return function* () {
-        // TODO implement!
+        let generator1 = g1();
+        let generator2 = g2();
+        while(1) {
+            const pair = [generator1.next(), generator2.next()];
+            if (pair.some(next => next.done)) return; // checks if one of the current pair is done
+            yield [pair[0].value, pair[1].value];
+        }
     }
 }
 
