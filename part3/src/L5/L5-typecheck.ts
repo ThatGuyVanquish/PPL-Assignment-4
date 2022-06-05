@@ -11,9 +11,11 @@ import { isProcTExp, makeBoolTExp, makeNumTExp, makeProcTExp, makeStrTExp, makeV
          parseTE, unparseTExp, Record,
          BoolTExp, NumTExp, StrTExp, TExp, VoidTExp, UserDefinedTExp, isUserDefinedTExp, UDTExp, 
          isNumTExp, isBoolTExp, isStrTExp, isVoidTExp,
-         isRecord, ProcTExp, makeUserDefinedNameTExp, Field, makeAnyTExp, isAnyTExp, isUserDefinedNameTExp } from "./TExp";
+         isRecord, ProcTExp, makeUserDefinedNameTExp, Field, makeAnyTExp, isAnyTExp, isUserDefinedNameTExp, makeTVar } from "./TExp";
 import { isEmpty, allT, first, rest, cons } from '../shared/list';
 import { Result, makeFailure, bind, makeOk, zipWithResult, mapv, mapResult, isFailure, either } from '../shared/result';
+import { isSymbolObject } from 'util/types';
+import { isSymbolSExp, makeSymbolSExp } from './L5-value';
 
 // L51
 export const getTypeDefinitions = (p: Program): UserDefinedTExp[] => {
@@ -380,11 +382,14 @@ export const typeofDefineType = (exp: DefineTypeExp, _tenv: TEnv, _p: Program): 
     makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
 
 // TODO L51
-export const typeofSet = (exp: SetExp, _tenv: TEnv, _p: Program): Result<TExp> =>
-    makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
+export const typeofSet = (exp: SetExp, _tenv: TEnv, _p: Program): Result<TExp> => {
+    const texpEnv = applyTEnv(_tenv, exp.var.var);
+    const typeResult = bind(texpEnv, (varType) => bind(typeofExp(exp.val, _tenv, _p), (typeOfVal: TExp) => checkEqualType(varType, typeOfVal, exp, _p)));
+    return bind(typeResult, () => makeOk(makeVoidTExp()));
+}
 
 // TODO L51
-export const typeofLit = (exp: LitExp, _tenv: TEnv, _p: Program): Result<TExp> =>
+export const typeofLit = (exp: LitExp, _tenv: TEnv, _p: Program): Result<TExp> => 
     makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
 
 // TODO: L51
