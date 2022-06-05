@@ -110,11 +110,12 @@ export type ReactiveTableService<T> = {
 
 export async function makeReactiveTableService<T>(sync: (table?: Table<T>) => Promise<Table<T>>, optimistic: boolean): Promise<ReactiveTableService<T>> {
     // optional initialization code
-
+    let observers: ((table: Table<T>) => void)[] = [];
     let _table: Table<T> = await sync()
 
     const handleMutation = async (newTable: Table<T>) => {
-        // TODO implement!
+        for(let i = 0; i < observers.length; i++) // for each observer in observers array, call the observer to watch newTable
+            observers[i](newTable);
     }
     return {
         get(key: string): T {
@@ -124,15 +125,44 @@ export async function makeReactiveTableService<T>(sync: (table?: Table<T>) => Pr
                 throw MISSING_KEY
             }
         },
-        set(key: string, val: T): Promise<void> {
-            return handleMutation(null as any /* TODO */)
+        async set(key: string, val: T): Promise<void> {
+            _table = await sync();
+            let newTable: Table<T> = {..._table, [key]:val};
+            if (optimistic) {
+                try {
+                    await handleMutation(newTable);
+                    await sync(newTable); 
+                }
+                catch (error) {
+                    await handleMutation(_table);
+                    throw error;
+                }
+            }
+            else {
+                await sync(newTable);
+                await handleMutation(newTable);
+            }
         },
-        delete(key: string): Promise<void> {
-            return handleMutation(null as any /* TODO */)
+        async delete(key: string): Promise<void> {
+            _table = await sync();
+            let {[key]:val, ...newTable}: Table<T> = _table;
+            if (optimistic) {
+                try {
+                    await handleMutation(newTable);
+                    await sync(newTable);
+                }
+                catch (error) {
+                    await handleMutation(_table);
+                    throw error;
+                }
+            }
+            else {
+                await sync(newTable);
+                await handleMutation(newTable);
+            }
         },
-
         subscribe(observer: (table: Table<T>) => void): void {
-            // TODO implement!
+            observers.push(observer);
         }
     }
 }
