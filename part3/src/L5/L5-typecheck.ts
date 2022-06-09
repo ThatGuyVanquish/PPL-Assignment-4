@@ -11,9 +11,12 @@ import { isProcTExp, makeBoolTExp, makeNumTExp, makeProcTExp, makeStrTExp, makeV
          parseTE, unparseTExp, Record,
          BoolTExp, NumTExp, StrTExp, TExp, VoidTExp, UserDefinedTExp, isUserDefinedTExp, UDTExp, 
          isNumTExp, isBoolTExp, isStrTExp, isVoidTExp,
-         isRecord, ProcTExp, makeUserDefinedNameTExp, Field, makeAnyTExp, isAnyTExp, isUserDefinedNameTExp } from "./TExp";
+         isRecord, ProcTExp, makeUserDefinedNameTExp, Field, makeAnyTExp, isAnyTExp, isUserDefinedNameTExp, makeSymbolTExp, makePairTExp } from "./TExp";
 import { isEmpty, allT, first, rest, cons } from '../shared/list';
-import { Result, makeFailure, bind, makeOk, zipWithResult, mapv, mapResult, isFailure, either } from '../shared/result';
+import { Result, makeFailure, bind, makeOk, zipWithResult, mapv, mapResult, isFailure, either, isOk } from '../shared/result';
+import { isNumber, isString } from '../shared/type-predicates';
+import { isSymbolObject } from 'util/types';
+import { isCompoundSExp, isEmptySExp, isSymbolSExp } from './L5-value';
 
 // L51
 export const getTypeDefinitions = (p: Program): UserDefinedTExp[] => {
@@ -74,20 +77,24 @@ export const getTypeByName = (typeName: string, p: Program): Result<UDTExp> => {
     }
 }
 
-// TODO L51
+// TODO L51 V
 // Is te1 a subtype of te2?
-const isSubType = (te1: TExp, te2: TExp, p: Program): boolean =>
-    false;
+    const isSubType = (te1: TExp, te2: TExp, p: Program): boolean => {
+    if(isUserDefinedNameTExp(te1) && isUserDefinedNameTExp(te2) && isOk(getRecordByName(te1.typeName,p))){
+        let nameOfType = getUserDefinedTypeByName(te2.typeName, p)
+        if(isOk(nameOfType)) return getRecordParents(te1.typeName,p).includes(nameOfType.value)  
+    } 
+    return isAnyTExp(te2) ? true : false
+}
 
-
-// TODO L51: Change this definition to account for user defined types
+// TODO L51 V: Change this definition to account for user defined types
 // Purpose: Check that the computed type te1 can be accepted as an instance of te2
 // test that te1 is either the same as te2 or more specific
 // Deal with case of user defined type names 
 // Exp is only passed for documentation purposes.
 // p is passed to provide the context of all user defined types
 export const checkEqualType = (te1: TExp, te2: TExp, exp: Exp, p: Program): Result<TExp> =>
-  equals(te1, te2) ? makeOk(te2) :
+  equals(te1, te2) || isSubType(te1, te2, p) ? makeOk(te2) : 
   makeFailure(`Incompatible types: ${te1} and ${te2} in ${exp}`);
 
 
@@ -158,7 +165,8 @@ export const initTEnv = (p: Program): TEnv =>
 // =================================================================================
 // TODO L51
 const checkUserDefinedTypes = (p: Program): Result<true> =>
-    // If the same type name is defined twice with different definitions
+
+// If the same type name is defined twice with different definitions
     // If a recursive type has no base case
     makeOk(true);
 
@@ -377,15 +385,25 @@ export const typeofProgram = (exp: Program, tenv: TEnv, p: Program): Result<TExp
 // TODO L51
 // Write the typing rule for DefineType expressions
 export const typeofDefineType = (exp: DefineTypeExp, _tenv: TEnv, _p: Program): Result<TExp> =>
-    makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
+    bind(checkUserDefinedTypes(_p), (bool : true) =>
+    getUserDefinedTypeByName(exp.typeName,_p))
 
 // TODO L51
-export const typeofSet = (exp: SetExp, _tenv: TEnv, _p: Program): Result<TExp> =>
-    makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
+export const typeofSet = (exp: SetExp, _tenv: TEnv, _p: Program): Result<TExp> => {
+    const eqTypes = bind(typeofExp(exp.val, _tenv, _p), (valtype: TExp) => bind(applyTEnv(_tenv, exp.var.var),
+                        (vartype: TExp) => checkEqualType(vartype, valtype, exp, _p)));
+    return bind(eqTypes, (garethBale: TExp) => makeOk(makeVoidTExp()));
+}
 
 // TODO L51
 export const typeofLit = (exp: LitExp, _tenv: TEnv, _p: Program): Result<TExp> =>
-    makeFailure(`Todo ${JSON.stringify(exp, null, 2)}`);
+    isNumber(exp.val) ? makeOk(makeNumTExp()) :
+    exp.val === true || exp.val === false ? makeOk(makeBoolTExp()) :
+    isString(exp.val) ? makeOk(makeStrTExp()) :
+    isSymbolSExp(exp.val) ? makeOk(makeSymbolTExp(exp.val)) :
+    isEmptySExp(exp.val) ? makeOk(makeSymbolTExp()) :
+    isCompoundSExp(exp.val) ? makeOk(makePairTExp()) :
+    makeFailure(`Literal with unknown type ${exp}`)
 
 // TODO: L51
 // Purpose: compute the type of a type-case
