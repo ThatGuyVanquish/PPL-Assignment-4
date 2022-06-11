@@ -46,24 +46,27 @@ import { makeBox, setBox, unbox, Box } from '../shared/box';
 import { cons, first, rest } from '../shared/list';
 import { Result, bind, makeOk, makeFailure, mapResult, mapv } from "../shared/result";
 import { isCompoundSexp, isToken, parse as p } from "../shared/parser";
-import { SExpValue } from "./L5-value";
 
-export type TExp =  AtomicTExp | CompoundTExp | TVar | UserDefinedNameTExp | SymbolTExp | PairTExp; // L51
-export const isTExp = (x: any): x is TExp => isAtomicTExp(x) || isCompoundTExp(x) || isTVar(x) || isUserDefinedNameTExp(x) ||
-    isPairTExp(x) || isSymbolTExp(x); // L51
+export type TExp =  AtomicTExp | CompoundTExp | TVar | UserDefinedNameTExp; // L51
+export const isTExp = (x: any): x is TExp => isAtomicTExp(x) || isCompoundTExp(x) || isTVar(x) || isUserDefinedNameTExp(x); // L51
 
 export type AtomicTExp = NumTExp | BoolTExp | StrTExp | VoidTExp | UserDefinedNameTExp | AnyTExp; // L51
 export const isAtomicTExp = (x: any): x is AtomicTExp =>
     isNumTExp(x) || isBoolTExp(x) || isStrTExp(x) || isVoidTExp(x) || isUserDefinedNameTExp(x) || isAnyTExp(x); // L51
 
-export type CompoundTExp = ProcTExp | TupleTExp | UserDefinedTExp | Record;  // L51
-export const isCompoundTExp = (x: any): x is CompoundTExp => isProcTExp(x) || isTupleTExp(x) || isUserDefinedTExp(x); 
+export type CompoundTExp = ProcTExp | TupleTExp | LitTExp | UserDefinedTExp | Record;  // L51
+export const isCompoundTExp = (x: any): x is CompoundTExp => isProcTExp(x) || isTupleTExp(x) || isLitTExp(x) || isUserDefinedTExp(x); 
 
 export type NonTupleTExp = AtomicTExp | ProcTExp | TVar | UserDefinedNameTExp; // L51
 export const isNonTupleTExp = (x: any): x is NonTupleTExp =>
     isAtomicTExp(x) || isProcTExp(x) || isTVar(x) || isUserDefinedNameTExp(x);  // L51
 
 // L51<
+
+export type LitTExp = { tag: "LitTExp" };
+export const makeLitTExp = (): LitTExp => ({tag: "LitTExp"});
+export const isLitTExp = (x: any): x is LitTExp => x.tag === "LitTExp";
+
 export type AnyTExp = {tag: "AnyTExp"};
 export const makeAnyTExp = (): AnyTExp => ({tag: "AnyTExp"});
 export const isAnyTExp = (x: any): x is AnyTExp => x.tag === "AnyTExp";
@@ -108,15 +111,6 @@ export const isStrTExp = (x: any): x is StrTExp => x.tag === "StrTExp";
 export type VoidTExp = { tag: "VoidTExp" };
 export const makeVoidTExp = (): VoidTExp => ({tag: "VoidTExp"});
 export const isVoidTExp = (x: any): x is VoidTExp => x.tag === "VoidTExp";
-
-export type PairTExp = { tag: "PairTExp" };
-export const makePairTExp = (): PairTExp => ({tag: "PairTExp"});
-export const isPairTExp = (x: any): x is PairTExp => x.tag === "PairTExp";
-
-export type SymbolTExp = { tag: "SymbolTExp", val?: SExpValue };
-export const makeSymbolTExp = (val: SExpValue): SymbolTExp => ({tag: "SymbolTExp", val});
-export const isSymbolTExp = (x: any): x is SymbolTExp => x.tag === "SymbolTExp";
-
 
 // proc-te(param-tes: list(te), return-te: te)
 export type ProcTExp = { tag: "ProcTExp"; paramTEs: TExp[]; returnTE: TExp; };
@@ -219,6 +213,7 @@ export const parseTExp = (texp: Sexp, udTypeNames: string[]): Result<TExp> => //
     (texp === "boolean") ? makeOk(makeBoolTExp()) :
     (texp === "void") ? makeOk(makeVoidTExp()) :
     (texp === "string") ? makeOk(makeStrTExp()) :
+    (texp === "literal") ? makeOk(makeLitTExp()) :
     (texp === "any") ? makeOk(makeAnyTExp()) :
     isString(texp) && isConcreteTVar(texp) ? makeOk(makeTVar(texp)) :
     isString(texp) && isConcreteUserDefinedTypeName(texp, udTypeNames) ? makeOk(makeUserDefinedNameTExp(texp)) : // L51
@@ -346,6 +341,7 @@ export const unparseTExp = (te: TExp): Result<string> => {
         isStrTExp(x) ? makeOk('string') :
         isVoidTExp(x) ? makeOk('void') :
         isAnyTExp(x) ? makeOk('any') :
+        isLitTExp(x) ? makeOk('literal') :
         isEmptyTVar(x) ? makeOk(x.var) :
         isUserDefinedNameTExp(x) ? makeOk(x.typeName) :
         isTVar(x) ? up(tvarContents(x)) :
@@ -356,8 +352,6 @@ export const unparseTExp = (te: TExp): Result<string> => {
                                 [...paramTEs, '->', returnTE])) :
         isEmptyTupleTExp(x) ? makeOk("Empty") :
         isNonEmptyTupleTExp(x) ? unparseTuple(x.TEs) :
-        isPairTExp(x) ? makeOk('Pair') :
-        isSymbolTExp(x) ? makeOk('Symbol') :
         x === undefined ? makeFailure("Undefined TVar") :
         x;
 
