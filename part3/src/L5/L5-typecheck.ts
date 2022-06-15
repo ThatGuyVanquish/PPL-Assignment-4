@@ -5,7 +5,7 @@ import { isAppExp, isBoolExp, isDefineExp, isIfExp, isLetrecExp, isLetExp, isNum
          isPrimOp, isProcExp, isProgram, isStrExp, isVarRef, unparse, parseL51,
          AppExp, BoolExp, DefineExp, Exp, IfExp, LetrecExp, LetExp, NumExp, SetExp, LitExp,
          Parsed, PrimOp, ProcExp, Program, StrExp, isSetExp, isLitExp, 
-         isDefineTypeExp, isTypeCaseExp, DefineTypeExp, TypeCaseExp } from "./L5-ast";
+         isDefineTypeExp, isTypeCaseExp, DefineTypeExp, TypeCaseExp, CaseExp } from "./L5-ast";
 import { applyTEnv, makeEmptyTEnv, makeExtendTEnv, TEnv } from "./TEnv";
 import { isProcTExp, makeBoolTExp, makeNumTExp, makeProcTExp, makeStrTExp, makeVoidTExp,
          parseTE, unparseTExp, Record,
@@ -98,9 +98,9 @@ const isSubType = (te1: TExp, te2: TExp, p: Program): boolean => {
 export const checkEqualType = (te1: TExp, te2: TExp, exp: Exp, p: Program): Result<TExp> =>
     equals(te1, te2) ? makeOk(te2) :
     isUserDefinedNameTExp(te1) && (isUserDefinedTExp(te2) || isRecord(te2)) && isOk(bind(getTypeByName(te1.typeName, p), te1 => equals(te1, te2) ? makeOk(te2) : 
-    makeFailure('neq'))) ? makeOk(te2) :
+    makeFailure('Incompatible types'))) ? makeOk(te2) :
     isUserDefinedNameTExp(te2) && (isUserDefinedTExp(te1) || isRecord(te1)) && isOk(bind(getTypeByName(te2.typeName, p), te2 => equals(te1, te2) ? makeOk(te2) : 
-    makeFailure('neq'))) ? makeOk(te2) :
+    makeFailure('Incompatible types'))) ? makeOk(te2) :
     isSubType(te1, te2, p) ? makeOk(te2) :
     bind(unparseTExp(te1), (te1: string) => bind(unparseTExp(te2), (te2: string) => bind(unparse(exp), (exp: string) =>
             makeFailure<TExp>(`Incompatible types: ${te1} and ${te2} in ${exp}`))));
@@ -161,29 +161,29 @@ export const checkCoverType = (types: TExp[], p: Program): Result<TExp> => {
 
 // TODO: Define here auxiliary functions for TEnv computation
 const extendDefineEnv = (p: Program, env : TEnv) : TEnv =>{
-    let defineNames : string[] = getDefinitions(p).map(def => def.var.var);
-    let defineTypes : TExp[] = getDefinitions(p).map(def => def.var.texp);
+    const defineNames : string[] = getDefinitions(p).map(def => def.var.var);
+    const defineTypes : TExp[] = getDefinitions(p).map(def => def.var.texp);
     return makeExtendTEnv(defineNames, defineTypes, env);
 }
 
 const extendDefineTypesEnv = (p: Program, env: TEnv) : TEnv =>{
-    let defineTypes : UserDefinedTExp[] = getTypeDefinitions(p);
-    let defineTypeNames : string[] = defineTypes.map(val => val.typeName);
+    const defineTypes : UserDefinedTExp[] = getTypeDefinitions(p);
+    const defineTypeNames : string[] = defineTypes.map(val => val.typeName);
 
-    let typePredName : string[] = defineTypeNames.map(name => name.concat('?'));
-    let typePred : ProcTExp[] = typePredName.map(_ => makeProcTExp([makeAnyTExp()], makeBoolTExp())) 
+    const typePredName : string[] = defineTypeNames.map(name => name.concat('?'));
+    const typePred : ProcTExp[] = typePredName.map(_ => makeProcTExp([makeAnyTExp()], makeBoolTExp())) 
 
     return makeExtendTEnv(concat(defineTypeNames, typePredName), concat(defineTypes, typePred), env);
 }
 const extendRecordsEnv = (p: Program, env : TEnv): TEnv =>{
-    let recordTypes = getRecords(p);
-    let recordNames = recordTypes.map(val => val.typeName);
+    const recordTypes : Record[] = getRecords(p);
+    const recordNames : string[] = recordTypes.map(val => val.typeName);
 
-    let typePredName = recordNames.map(name => name.concat('?'));
-    let typePred = typePredName.map(_ => makeProcTExp([makeAnyTExp()], makeBoolTExp())) 
+    const typePredName : string[] = recordNames.map(name => name.concat('?'));
+    const typePred : ProcTExp[] = typePredName.map(_ => makeProcTExp([makeAnyTExp()], makeBoolTExp())) 
 
-    let makeNames = recordNames.map(name => 'make-'.concat(name));
-    let makeTypes = recordTypes.map(rec => makeProcTExp(rec.fields.map(f => f.te), rec));
+    const makeNames : string[] = recordNames.map(name => 'make-'.concat(name));
+    const makeTypes : ProcTExp[] = recordTypes.map(rec => makeProcTExp(rec.fields.map(f => f.te), rec));
 
     return makeExtendTEnv(
         concat(concat(recordNames, typePredName), makeNames),
@@ -197,9 +197,7 @@ const extendRecordsEnv = (p: Program, env : TEnv): TEnv =>{
 // * Type of global variables (define expressions at top level of p)
 // * Type of implicitly defined procedures for user defined types (define-type expressions in p)
 export const initTEnv = (p: Program): TEnv =>
-    extendRecordsEnv(p, 
-        extendDefineTypesEnv(p, 
-            extendDefineEnv(p, makeEmptyTEnv())));
+    extendRecordsEnv(p, extendDefineTypesEnv(p, extendDefineEnv(p, makeEmptyTEnv())));
 
 
 const compareFields = (f1 : Field , f2 : Field) : boolean => 
@@ -232,8 +230,8 @@ const checkTypeCase = (tc: TypeCaseExp, p: Program): Result<true> =>
     bind(checkCoverType([makeUserDefinedNameTExp(tc.typeName), ...tc.cases.map(c => makeUserDefinedNameTExp(c.typeName))], p),
         udt => bind(getUserDefinedTypeByName((udt as UserDefinedNameTExp).typeName, p), udt =>
         {
-            let typeCases = tc.cases.sort((a,b) => a.typeName.localeCompare(b.typeName));
-            let records = [...udt.records].sort((a,b) => a.typeName.localeCompare(b.typeName))
+            const typeCases : CaseExp[] = tc.cases.sort((a,b) => a.typeName.localeCompare(b.typeName));
+            const records : Record[] = [...udt.records].sort((a,b) => a.typeName.localeCompare(b.typeName))
 
             return records.length === typeCases.length &&
                     records.every((rec, idx) => rec.typeName === typeCases[idx].typeName && rec.fields.length === typeCases[idx].varDecls.length) ?
