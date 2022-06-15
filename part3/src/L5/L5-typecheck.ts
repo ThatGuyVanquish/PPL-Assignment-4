@@ -6,7 +6,7 @@ import { isAppExp, isBoolExp, isDefineExp, isIfExp, isLetrecExp, isLetExp, isNum
          AppExp, BoolExp, DefineExp, Exp, IfExp, LetrecExp, LetExp, NumExp, SetExp, LitExp,
          Parsed, PrimOp, ProcExp, Program, StrExp, isSetExp, isLitExp, 
          isDefineTypeExp, isTypeCaseExp, DefineTypeExp, TypeCaseExp, CaseExp } from "./L5-ast";
-import { applyTEnv, makeEmptyTEnv, makeExtendTEnv, TEnv } from "./TEnv";
+import { applyTEnv, ExtendTEnv, makeEmptyTEnv, makeExtendTEnv, TEnv } from "./TEnv";
 import { isProcTExp, makeBoolTExp, makeNumTExp, makeProcTExp, makeStrTExp, makeVoidTExp,
          parseTE, unparseTExp, Record,
          BoolTExp, NumTExp, StrTExp, TExp, VoidTExp, UserDefinedTExp, isUserDefinedTExp, UDTExp, 
@@ -79,15 +79,14 @@ export const getTypeByName = (typeName: string, p: Program): Result<UDTExp> => {
 const isSubType = (te1: TExp, te2: TExp, p: Program): boolean => {
     if (isAnyTExp(te2)) return true;
     
-    let udt2 = isUserDefinedTExp(te2) ? te2 :
+    const te2TypeExp = isUserDefinedTExp(te2) ? te2 :
                isUserDefinedNameTExp(te2) ? either(getUserDefinedTypeByName(te2.typeName, p), udt => udt, _ => null) : 
                null;
-    return udt2 === null ? false : 
-        isRecord(te1) ? udt2.records.includes(te1) :
-        isUserDefinedNameTExp(te1) ? udt2.records.some(record => record.typeName == te1.typeName) :
+    return te2TypeExp === null ? false : 
+        isRecord(te1) ? te2TypeExp.records.includes(te1) :
+        isUserDefinedNameTExp(te1) ? te2TypeExp.records.some(record => record.typeName == te1.typeName) :
         false;
 }
-
 
 // TODO L51: Change this definition to account for user defined types
 // Purpose: Check that the computed type te1 can be accepted as an instance of te2
@@ -95,12 +94,14 @@ const isSubType = (te1: TExp, te2: TExp, p: Program): boolean => {
 // Deal with case of user defined type names 
 // Exp is only passed for documentation purposes.
 // p is passed to provide the context of all user defined types
+
+const checkDeepEqualType = (te1 : TExp, te2 : TExp, p : Program) => 
+    isUserDefinedNameTExp(te1) && (isUserDefinedTExp(te2) || isRecord(te2)) && isOk(bind(getTypeByName(te1.typeName, p), te1 => equals(te1, te2) ? makeOk(te2) : makeFailure("Incompatible types")));
+
 export const checkEqualType = (te1: TExp, te2: TExp, exp: Exp, p: Program): Result<TExp> =>
     equals(te1, te2) ? makeOk(te2) :
-    isUserDefinedNameTExp(te1) && (isUserDefinedTExp(te2) || isRecord(te2)) && isOk(bind(getTypeByName(te1.typeName, p), te1 => equals(te1, te2) ? makeOk(te2) : 
-    makeFailure('Incompatible types'))) ? makeOk(te2) :
-    isUserDefinedNameTExp(te2) && (isUserDefinedTExp(te1) || isRecord(te1)) && isOk(bind(getTypeByName(te2.typeName, p), te2 => equals(te1, te2) ? makeOk(te2) : 
-    makeFailure('Incompatible types'))) ? makeOk(te2) :
+    checkDeepEqualType(te1, te2, p) ? makeOk(te2) :
+    checkDeepEqualType(te2, te1, p) ? makeOk(te2) :
     isSubType(te1, te2, p) ? makeOk(te2) :
     bind(unparseTExp(te1), (te1: string) => bind(unparseTExp(te2), (te2: string) => bind(unparse(exp), (exp: string) =>
             makeFailure<TExp>(`Incompatible types: ${te1} and ${te2} in ${exp}`))));
@@ -191,7 +192,6 @@ const extendRecordsEnv = (p: Program, env : TEnv): TEnv =>{
         env);
 }
 
-
 // TOODO L51
 // Initialize TEnv with:
 // * Type of global variables (define expressions at top level of p)
@@ -199,10 +199,8 @@ const extendRecordsEnv = (p: Program, env : TEnv): TEnv =>{
 export const initTEnv = (p: Program): TEnv =>
     extendRecordsEnv(p, extendDefineTypesEnv(p, extendDefineEnv(p, makeEmptyTEnv())));
 
-
 const compareFields = (f1 : Field , f2 : Field) : boolean => 
     f1.fieldName === f2.fieldName && f1.te.tag === f2.te.tag && equivalentTEs(f1.te, f2.te);
-
 
 // Verify that user defined types and type-case expressions are semantically correct
 // =================================================================================
@@ -211,16 +209,15 @@ const checkUserDefinedTypes = (p: Program): Result<true> => {
     // If the same type name is defined twice with different definitions
     // If a recursive type has no base case
         const record : Record[]= getRecords(p);
-        const compareRecords = record.every(r => 
-            record.filter(r1 => r1.typeName === r.typeName).every(r2 => 
-                r.fields.length === r2.fields.length 
-                && r2.fields.every(f2 => r.fields.some(f => compareFields(f, f2))) && r.fields.every(f => r2.fields.some(f2 => compareFields(f, f2)))));
+        const compareRecords : boolean = record.every(r => 
+            record.filter(r1 => r1.typeName === r.typeName)
+            .every(r2 => r.fields.length === r2.fields.length && 
+                r2.fields.every(f2 => r.fields.some(f => compareFields(f, f2))) && r.fields.every(f => r2.fields.some(f2 => compareFields(f, f2)))));
 
-        const udt : UserDefinedTExp[]= getTypeDefinitions(p);
-        let isLegalRec = udt.filter(def => def.records.some(r=> r.fields.some(f => isUserDefinedTExp(f.te) ?  f.te.typeName === def.typeName : false)))
+        const isLegalRecord : boolean = getTypeDefinitions(p).filter(def => def.records.some(r=> r.fields.some(f => isUserDefinedTExp(f.te) ?  f.te.typeName === def.typeName : false)))
         .every(def => def.records.some(r => r.fields.every(f => isUserDefinedTExp(f.te) ? (f.te.typeName !== def.typeName) : false)));
 
-        return compareRecords && isLegalRec ? makeOk(true) : makeFailure('Invalid UDT');
+        return compareRecords && isLegalRecord ? makeOk(true) : makeFailure('Invalid UDT');
     }
 
 // TODO L51
@@ -228,14 +225,13 @@ const checkUserDefinedTypes = (p: Program): Result<true> => {
 // and check that in each case the number of var declarations corresponds to the number of fields
 const checkTypeCase = (tc: TypeCaseExp, p: Program): Result<true> =>
     bind(checkCoverType([makeUserDefinedNameTExp(tc.typeName), ...tc.cases.map(c => makeUserDefinedNameTExp(c.typeName))], p),
-        udt => bind(getUserDefinedTypeByName((udt as UserDefinedNameTExp).typeName, p), udt =>
-        {
+        udt => bind(getUserDefinedTypeByName((udt as UserDefinedNameTExp).typeName, p), udt => {
             const typeCases : CaseExp[] = tc.cases.sort((a,b) => a.typeName.localeCompare(b.typeName));
             const records : Record[] = [...udt.records].sort((a,b) => a.typeName.localeCompare(b.typeName))
 
             return records.length === typeCases.length &&
-                    records.every((rec, idx) => rec.typeName === typeCases[idx].typeName && rec.fields.length === typeCases[idx].varDecls.length) ?
-                    makeOk(true) : makeFailure('Invalid type case');
+                records.every((rec, idx) => rec.typeName === typeCases[idx].typeName && rec.fields.length === typeCases[idx].varDecls.length) ?makeOk(true) : 
+                    makeFailure('Invalid type-case');
         }));
 
 // Compute the type of L5 AST exps to TE
@@ -330,11 +326,11 @@ export const typeofPrim = (p: PrimOp): Result<TExp> =>
 //      type<else>(tenv) = t1
 // then type<(if test then else)>(tenv) = t1
 export const typeofIf = (ifExp: IfExp, tenv: TEnv, p: Program): Result<TExp> => {
-    const testTE = typeofExp(ifExp.test, tenv, p);
-    const thenTE = typeofExp(ifExp.then, tenv, p);
-    const altTE = typeofExp(ifExp.alt, tenv, p);
-    const constraint1 = bind(testTE, testTE => checkEqualType(testTE, makeBoolTExp(), ifExp, p));
-    const constraint2 = bind(thenTE, (thenTE: TExp) =>
+    const testTE : Result<TExp> = typeofExp(ifExp.test, tenv, p);
+    const thenTE :  Result<TExp> = typeofExp(ifExp.then, tenv, p);
+    const altTE :  Result<TExp> = typeofExp(ifExp.alt, tenv, p);
+    const constraint1 :  Result<TExp> = bind(testTE, testTE => checkEqualType(testTE, makeBoolTExp(), ifExp, p));
+    const constraint2 :  Result<TExp> = bind(thenTE, (thenTE: TExp) =>
                             bind(altTE, (altTE: TExp) =>
                                 checkCoverType([thenTE, altTE], p)));
     return bind(constraint1, (_c1) => constraint2);
@@ -430,8 +426,8 @@ export const typeofLetrec = (exp: LetrecExp, tenv: TEnv, p: Program): Result<TEx
 // If   type<val>(tenv-val) = texp
 // then type<(define (var : texp) val)>(tenv) = void
 export const typeofDefine = (exp: DefineExp, tenv: TEnv, p: Program): Result<VoidTExp> => {
-    const valTEnv = makeExtendTEnv([exp.var.var], [exp.var.texp], tenv);
-    const constraint = typeofExp(exp.val, valTEnv, p);    
+    const valTEnv : ExtendTEnv = makeExtendTEnv([exp.var.var], [exp.var.texp], tenv);
+    const constraint : Result<TExp> = typeofExp(exp.val, valTEnv, p);    
     return mapv(constraint, (_) => makeVoidTExp());
 };
 
